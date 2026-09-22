@@ -3,10 +3,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 
@@ -28,6 +30,14 @@ type config struct {
 	dryRun      bool
 	showVersion bool
 	args        []string
+
+	// Pulling straight from Confluence instead of converting local files
+	pageURL   string
+	token     string
+	user      string
+	recursive bool
+	depth     int
+	outDir    string
 }
 
 // parseFlags parses command-line flags and returns a config.
@@ -43,12 +53,20 @@ func parseFlags(args []string, output io.Writer) (*config, error) {
 	verboseLong := fs.Bool("verbose", false, "Verbose output")
 	dryRun := fs.Bool("dry-run", false, "Show what would be converted without writing")
 	showVersion := fs.Bool("version", false, "Show version")
+	pageURL := fs.String("url", "", "Confluence page URL to fetch and convert")
+	token := fs.String("token", "", "Confluence personal access token or API token (default: $CONFLUENCE_TOKEN)")
+	user := fs.String("user", "", "Account email for Confluence Cloud API tokens (default: $CONFLUENCE_USER)")
+	recursive := fs.Bool("r", false, "With --url, also fetch every page under it")
+	recursiveLong := fs.Bool("recursive", false, "With --url, also fetch every page under it")
+	depth := fs.Int("depth", 0, "With --recursive, how many levels of children to fetch (0 = all)")
+	outDir := fs.String("out-dir", ".", "With --url, directory to write pages into")
 
 	fs.Usage = func() {
 		fmt.Fprintf(output, "confluence2md - Convert Confluence MIME exports to Markdown\n\n")
 		fmt.Fprintf(output, "Usage:\n")
 		fmt.Fprintf(output, "  confluence2md [flags] <input.doc>\n")
-		fmt.Fprintf(output, "  confluence2md --dir <directory>\n\n")
+		fmt.Fprintf(output, "  confluence2md --dir <directory>\n")
+		fmt.Fprintf(output, "  confluence2md --url <page url> [--recursive]\n\n")
 		fmt.Fprintf(output, "Flags:\n")
 		fs.PrintDefaults()
 		fmt.Fprintf(output, "\nExamples:\n")
@@ -56,6 +74,9 @@ func parseFlags(args []string, output io.Writer) (*config, error) {
 		fmt.Fprintf(output, "  confluence2md document.doc -o output.md       Convert with custom output\n")
 		fmt.Fprintf(output, "  confluence2md --dir ./docs                    Convert all .doc files in directory\n")
 		fmt.Fprintf(output, "  confluence2md --dir ./docs --dry-run          Preview conversions\n")
+		fmt.Fprintf(output, "  confluence2md --url <page url>                Fetch and convert a page\n")
+		fmt.Fprintf(output, "  confluence2md --url <page url> -r --out-dir ./docs\n")
+		fmt.Fprintf(output, "                                                Fetch a page and everything under it\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
@@ -69,14 +90,56 @@ func parseFlags(args []string, output io.Writer) (*config, error) {
 	}
 	isVerbose := *verbose || *verboseLong
 
-	return &config{
+	// Prefer env vars for credentials so tokens don't end up in shell history
+	tok := *token
+	if tok == "" {
+		tok = os.Getenv("CONFLUENCE_TOKEN")
+	}
+	usr := *user
+	if usr == "" {
+		usr = os.Getenv("CONFLUENCE_USER")
+	}
+
+	cfg := &config{
 		outputPath:  outPath,
 		dirMode:     *dirMode,
 		verbose:     isVerbose,
 		dryRun:      *dryRun,
 		showVersion: *showVersion,
 		args:        fs.Args(),
-	}, nil
+		pageURL:     *pageURL,
+		token:       tok,
+		user:        usr,
+		recursive:   *recursive || *recursiveLong,
+		depth:       *depth,
+		outDir:      *outDir,
+	}
+
+	if err := cfg.validate(); err != nil {
+		fmt.Fprintf(output, "Error: %v\n", err)
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// validate rejects flag combinations that don't make sense together.
+func (c *config) validate() error {
+	if c.pageURL == "" {
+		if c.recursive {
+			return fmt.Errorf("--recursive only works with --url")
+		}
+		return nil
+	}
+	if c.dirMode != "" || len(c.args) > 0 {
+		return fmt.Errorf("--url can't be combined with --dir or an input file")
+	}
+	if c.recursive && c.outputPath != "" {
+		return fmt.Errorf("-o/--output writes a single file; use --out-dir with --recursive")
+	}
+	if c.depth < 0 {
+		return fmt.Errorf("--depth can't be negative")
+	}
+	return nil
 }
 
 // run executes the main logic and returns an exit code.
@@ -98,6 +161,21 @@ func run(cfg *config) int {
 		return 1
 	}
 
+	// Fetch from Confluence
+	if cfg.pageURL != "" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+
+		if err := pullFromConfluence(ctx, cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 1
+		}
+		if !cfg.dryRun {
+			printStarPrompt()
+		}
+		return 0
+	}
+
 	// Directory mode
 	if cfg.dirMode != "" {
 		if err := convertDirectory(cfg.dirMode, cfg.verbose, cfg.dryRun); err != nil {
@@ -115,7 +193,8 @@ func run(cfg *config) int {
 		fmt.Fprintf(os.Stderr, "confluence2md - Convert Confluence MIME exports to Markdown\n\n")
 		fmt.Fprintf(os.Stderr, "Usage:\n")
 		fmt.Fprintf(os.Stderr, "  confluence2md [flags] <input.doc>\n")
-		fmt.Fprintf(os.Stderr, "  confluence2md --dir <directory>\n\n")
+		fmt.Fprintf(os.Stderr, "  confluence2md --dir <directory>\n")
+		fmt.Fprintf(os.Stderr, "  confluence2md --url <page url> [--recursive]\n\n")
 		fmt.Fprintf(os.Stderr, "Run 'confluence2md --help' for more information.\n")
 		return 1
 	}

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--url` flag to fetch a page straight from Confluence instead of converting a `.doc` export
+- `--token` / `--user` flags (or `CONFLUENCE_TOKEN` / `CONFLUENCE_USER`) for Server/DC personal access tokens and Cloud API tokens
+- `-r, --recursive` to fetch a page and all of its descendants, written out as a matching folder tree
+- `--depth` to limit how far down the tree `--recursive` goes
+- `--out-dir` to choose where fetched pages are written
+- `confluence` package with a small REST client (v1 content API, handles pagination and 429 retries)
+
 ## [0.4.0] - 2026-01-10
 
 ### Added

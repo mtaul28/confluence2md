@@ -12,6 +12,10 @@ CLI tool to convert Confluence MIME-encoded `.doc` exports to clean Markdown.
 ```
 confluence2md/
 ├── main.go                      # CLI entry point, flag parsing
+├── remote.go                    # --url mode: fetch pages/trees and write Markdown
+├── confluence/
+│   ├── client.go                # Confluence REST client (pages, children, title lookup)
+│   └── url.go                   # Parse page URLs into base URL + page ID
 ├── converter/
 │   ├── mime.go                  # MIME parsing, HTML extraction
 │   ├── mime_test.go             # MIME parser tests
@@ -43,6 +47,15 @@ confluence2md/
 - `generateOutputPath()` - Output naming (`.doc` → `.md`, `+` → `-`)
 - `printStarPrompt()` - Post-conversion GitHub star prompt
 
+### remote.go
+- `pullFromConfluence()` - Entry point for `--url` mode
+- `puller.pullTree()` - Walks a page and its children, writing a mirrored folder tree
+- `pageFileName()` - Turns a page title into a safe file name
+
+### confluence/
+- `ParsePageURL()` - Handles `/spaces/KEY/pages/ID`, `viewpage.action?pageId=`, and `/display/KEY/Title` links
+- `Client.GetPage()` / `ChildPages()` / `FindPageID()` - v1 REST API calls (works on Cloud and Server/DC)
+
 ### converter/mime.go
 - `ExtractHTMLFromMIME()` - Parse MIME, decode quoted-printable, return HTML
 - `IsConfluenceMIME()` - Validate file is Confluence export
@@ -70,6 +83,7 @@ go test ./... -v
 # Run
 ./confluence2md input.doc
 ./confluence2md --dir /path/to/docs
+./confluence2md --url <page url> -r --out-dir ./docs
 ```
 
 ## Embedded Pandoc

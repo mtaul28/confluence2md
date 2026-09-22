@@ -37,6 +37,7 @@ You can't convert Confluence exports to Markdown for version control, static sit
 - Converts info/tip/warning boxes to blockquotes
 - Handles collapsible sections, code blocks, and tables
 - Batch convert entire directories
+- Pull pages straight from Confluence with a URL and token, including whole page trees
 
 ## Use Cases
 
@@ -83,6 +84,54 @@ confluence2md --dir /path/to/docs --dry-run
 confluence2md -v document.doc
 ```
 
+### Pulling pages directly from Confluence
+
+Skip the manual "Export to Word" step and point it at a page URL instead:
+
+```bash
+export CONFLUENCE_TOKEN=your-token
+
+# Fetch a single page
+confluence2md --url "https://confluence.example.com/pages/viewpage.action?pageId=12345"
+
+# Fetch a page and everything under it into ./docs
+confluence2md --url "https://confluence.example.com/display/ENG/Team+Home" -r --out-dir ./docs
+
+# Only go two levels deep, and preview first
+confluence2md --url "<page url>" -r --depth 2 --dry-run
+```
+
+**Authentication**
+
+- **Server / Data Center:** create a [Personal Access Token](https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html) and set `CONFLUENCE_TOKEN` (or pass `--token`). It's sent as a bearer token.
+- **Cloud:** create an [API token](https://id.atlassian.com/manage-profile/security/api-tokens) and also set `CONFLUENCE_USER` (or `--user`) to your account email. Cloud API tokens are sent as basic auth.
+
+Using the environment variables keeps the token out of your shell history.
+
+**Supported URL formats**
+
+- `https://<site>.atlassian.net/wiki/spaces/KEY/pages/12345/Title`
+- `https://<host>/pages/viewpage.action?pageId=12345`
+- `https://<host>/display/KEY/Page+Title`
+
+Short links (`/wiki/x/AbCd`) aren't supported yet; open the page and copy the full URL instead.
+
+**Output layout**
+
+With `--recursive`, pages are written as a folder tree that mirrors Confluence. A page that has children gets a folder with the same name next to its `.md` file:
+
+```
+docs/
+├── Team-Home.md
+└── Team-Home/
+    ├── Getting-Started.md
+    ├── Getting-Started/
+    │   └── Setup.md
+    └── API-Reference.md
+```
+
+Pages are fetched using Confluence's `export_view` rendering, which is the same HTML used by the Word export, so the output matches what you'd get from converting a `.doc` export. Attachments and images aren't downloaded; image links will still point at your Confluence server.
+
 ## Flags
 
 | Flag | Description |
@@ -92,6 +141,12 @@ confluence2md -v document.doc
 | `-v, --verbose` | Show detailed processing info |
 | `--dry-run` | Show what would be converted without writing |
 | `--version` | Show version |
+| `--url` | Confluence page URL to fetch and convert |
+| `--token` | Personal access token or API token (default: `$CONFLUENCE_TOKEN`) |
+| `--user` | Account email, only needed for Confluence Cloud (default: `$CONFLUENCE_USER`) |
+| `-r, --recursive` | With `--url`, also fetch every page under it |
+| `--depth` | With `--recursive`, how many levels of children to fetch (`0` = all) |
+| `--out-dir` | With `--url`, directory to write pages into (default: current directory) |
 
 ## What it converts
 
@@ -103,7 +158,7 @@ It does **not** handle:
 
 ## How it works
 
-1. **MIME parsing**: Extracts HTML content from the multipart MIME message
+1. **MIME parsing**: Extracts HTML content from the multipart MIME message (or, with `--url`, fetches the page's rendered HTML from the Confluence REST API)
 2. **Pandoc conversion**: Converts HTML to GitHub-flavored Markdown
 3. **Post-processing**: Cleans up Confluence-specific artifacts:
    - Removes wrapper divs (`Section1`, `toc-macro`)
