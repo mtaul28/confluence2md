@@ -84,41 +84,62 @@ confluence2md --dir /path/to/docs --dry-run
 confluence2md -v document.doc
 ```
 
-### Pulling pages directly from Confluence
+### Fetching pages directly from Confluence
 
-Skip the manual "Export to Word" step and point it at a page URL instead:
+Instead of exporting each page to Word by hand, you can give confluence2md a page URL and an access token. It downloads the page (and, if you want, every page below it) and converts it in one step.
+
+**1. Create a token**
+
+| Your Confluence | Create this | Then set |
+|-----------------|-------------|----------|
+| Server / Data Center | A [Personal Access Token](https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html) (your avatar → Settings → Personal Access Tokens) | `CONFLUENCE_TOKEN` |
+| Cloud (`*.atlassian.net`) | An [API token](https://id.atlassian.com/manage-profile/security/api-tokens) | `CONFLUENCE_TOKEN` **and** `CONFLUENCE_USER` (your Atlassian account email) |
+
+confluence2md only reads from Confluence, so a read-only token is fine.
+
+**2. Put the token in your environment**
 
 ```bash
 export CONFLUENCE_TOKEN=your-token
-
-# Fetch a single page
-confluence2md --url "https://confluence.example.com/pages/viewpage.action?pageId=12345"
-
-# Fetch a page and everything under it into ./docs
-confluence2md --url "https://confluence.example.com/display/ENG/Team+Home" -r --out-dir ./docs
-
-# Only go two levels deep, and preview first
-confluence2md --url "<page url>" -r --depth 2 --dry-run
+export CONFLUENCE_USER=you@example.com   # Cloud only
 ```
 
-**Authentication**
+`--token` and `--user` work too, but environment variables keep the token out of your shell history.
 
-- **Server / Data Center:** create a [Personal Access Token](https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html) and set `CONFLUENCE_TOKEN` (or pass `--token`). It's sent as a bearer token.
-- **Cloud:** create an [API token](https://id.atlassian.com/manage-profile/security/api-tokens) and also set `CONFLUENCE_USER` (or `--user`) to your account email. Cloud API tokens are sent as basic auth.
+**3. Copy the page URL from your browser and run**
 
-Using the environment variables keeps the token out of your shell history.
+Put the URL in quotes. Characters like `?` and `&` confuse the shell otherwise.
 
-**Supported URL formats**
+```bash
+# A single page, saved as ./Page-Title.md
+confluence2md --url "https://example.atlassian.net/wiki/spaces/ENG/pages/12345/Team+Home"
 
-- `https://<site>.atlassian.net/wiki/spaces/KEY/pages/12345/Title`
-- `https://<host>/pages/viewpage.action?pageId=12345`
-- `https://<host>/display/KEY/Page+Title`
+# A single page, saved to a file you choose
+confluence2md --url "<page url>" -o team-home.md
 
-Short links (`/wiki/x/AbCd`) aren't supported yet; open the page and copy the full URL instead.
+# A page and every page below it, saved under ./docs
+confluence2md --url "<page url>" --recursive --out-dir ./docs
 
-**Output layout**
+# Only the page and its direct children
+confluence2md --url "<page url>" --recursive --depth 1 --out-dir ./docs
 
-With `--recursive`, pages are written as a folder tree that mirrors Confluence. A page that has children gets a folder with the same name next to its `.md` file:
+# List what would be written without writing any files
+confluence2md --url "<page url>" --recursive --dry-run
+```
+
+#### Supported URLs
+
+| Format | Example |
+|--------|---------|
+| Cloud / newer Data Center | `https://example.atlassian.net/wiki/spaces/ENG/pages/12345/Team+Home` |
+| Server / Data Center page ID | `https://confluence.example.com/pages/viewpage.action?pageId=12345` |
+| Server / Data Center title link | `https://confluence.example.com/display/ENG/Team+Home` |
+
+Confluence installed under a sub-path (such as `https://intranet.example.com/confluence/...`) works as well. Short links like `/wiki/x/AbCd` aren't supported; open the page and copy the full URL from the address bar.
+
+#### What you get
+
+Each page becomes one Markdown file that starts with the page title as a `#` heading. With `--recursive`, the folders mirror the page tree in Confluence: a page with children gets a folder of the same name next to its `.md` file.
 
 ```
 docs/
@@ -130,7 +151,36 @@ docs/
     └── API-Reference.md
 ```
 
-Pages are fetched using Confluence's `export_view` rendering, which is the same HTML used by the Word export, so the output matches what you'd get from converting a `.doc` export. Attachments and images aren't downloaded; image links will still point at your Confluence server.
+- File names come from page titles. Spaces and characters that aren't allowed in file names (`/ \ : * ? " < > | +`) are replaced with `-`.
+- If two sibling pages end up with the same file name, the second one gets its page ID added (`A-B-67890.md`).
+- If a page in the tree fails, confluence2md prints a warning, carries on with the rest, and exits with an error at the end so scripts can tell.
+- Images and attachments aren't downloaded. Image links still point at your Confluence server.
+
+Pages are fetched in Confluence's `export_view` format. That's the same HTML the Word export uses, so the Markdown matches what you'd get from converting an exported `.doc` file.
+
+#### Flags for fetching
+
+| Flag | Description |
+|------|-------------|
+| `--url <url>` | Page to fetch, copied from your browser |
+| `--token <token>` | Personal Access Token (Server/DC) or API token (Cloud). Defaults to `$CONFLUENCE_TOKEN` |
+| `--user <email>` | Your Atlassian account email. **Cloud only.** Defaults to `$CONFLUENCE_USER` |
+| `-r, --recursive` | Also fetch every page below the given page |
+| `--depth <n>` | With `--recursive`, how many levels below the page to fetch. `0` (the default) means no limit |
+| `--out-dir <dir>` | Folder to write pages into. Defaults to the current directory |
+| `-o, --output <file>` | Save a single page (no `--recursive`) to this file instead of `<out-dir>/<Page-Title>.md` |
+
+`--verbose` and `--dry-run` work the same as for exported files. `--url` can't be combined with `--dir` or an input file.
+
+#### Troubleshooting
+
+| Error | What it usually means |
+|-------|-----------------------|
+| `401 unauthorized` | The token is wrong or expired. On Cloud, check that `CONFLUENCE_USER` is set to the email that owns the token. |
+| `403 forbidden` | The token works, but your account can't view that page. |
+| `page not found or not visible with this token` | Either the URL is wrong, or you don't have permission. Confluence answers "not found" in both cases. |
+| `expected JSON but got "text/html"` | The request was redirected to a login page, usually an SSO proxy in front of Confluence. Ask your admin whether token access is allowed through it. |
+| `could not find a page ID in ...` | The URL isn't one of the supported formats above. |
 
 ## Flags
 
@@ -141,12 +191,6 @@ Pages are fetched using Confluence's `export_view` rendering, which is the same 
 | `-v, --verbose` | Show detailed processing info |
 | `--dry-run` | Show what would be converted without writing |
 | `--version` | Show version |
-| `--url` | Confluence page URL to fetch and convert |
-| `--token` | Personal access token or API token (default: `$CONFLUENCE_TOKEN`) |
-| `--user` | Account email, only needed for Confluence Cloud (default: `$CONFLUENCE_USER`) |
-| `-r, --recursive` | With `--url`, also fetch every page under it |
-| `--depth` | With `--recursive`, how many levels of children to fetch (`0` = all) |
-| `--out-dir` | With `--url`, directory to write pages into (default: current directory) |
 
 ## What it converts
 
@@ -158,7 +202,7 @@ It does **not** handle:
 
 ## How it works
 
-1. **MIME parsing**: Extracts HTML content from the multipart MIME message (or, with `--url`, fetches the page's rendered HTML from the Confluence REST API)
+1. **MIME parsing**: Extracts HTML content from the multipart MIME message
 2. **Pandoc conversion**: Converts HTML to GitHub-flavored Markdown
 3. **Post-processing**: Cleans up Confluence-specific artifacts:
    - Removes wrapper divs (`Section1`, `toc-macro`)

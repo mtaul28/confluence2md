@@ -53,13 +53,13 @@ func parseFlags(args []string, output io.Writer) (*config, error) {
 	verboseLong := fs.Bool("verbose", false, "Verbose output")
 	dryRun := fs.Bool("dry-run", false, "Show what would be converted without writing")
 	showVersion := fs.Bool("version", false, "Show version")
-	pageURL := fs.String("url", "", "Confluence page URL to fetch and convert")
-	token := fs.String("token", "", "Confluence personal access token or API token (default: $CONFLUENCE_TOKEN)")
-	user := fs.String("user", "", "Account email for Confluence Cloud API tokens (default: $CONFLUENCE_USER)")
-	recursive := fs.Bool("r", false, "With --url, also fetch every page under it")
-	recursiveLong := fs.Bool("recursive", false, "With --url, also fetch every page under it")
-	depth := fs.Int("depth", 0, "With --recursive, how many levels of children to fetch (0 = all)")
-	outDir := fs.String("out-dir", ".", "With --url, directory to write pages into")
+	pageURL := fs.String("url", "", "Fetch this Confluence page and convert it (paste the `URL` from your browser)")
+	token := fs.String("token", "", "Personal access `token` (Server/DC) or API token (Cloud) for --url (default: $CONFLUENCE_TOKEN)")
+	user := fs.String("user", "", "Atlassian account `email`, only needed for Cloud (default: $CONFLUENCE_USER)")
+	recursive := fs.Bool("r", false, "Same as --recursive")
+	recursiveLong := fs.Bool("recursive", false, "With --url, also fetch every page below that page")
+	depth := fs.Int("depth", 0, "With --recursive, how many `levels` below the page to fetch (0 = no limit)")
+	outDir := fs.String("out-dir", ".", "With --url, `directory` to write pages into")
 
 	fs.Usage = func() {
 		fmt.Fprintf(output, "confluence2md - Convert Confluence MIME exports to Markdown\n\n")
@@ -74,9 +74,11 @@ func parseFlags(args []string, output io.Writer) (*config, error) {
 		fmt.Fprintf(output, "  confluence2md document.doc -o output.md       Convert with custom output\n")
 		fmt.Fprintf(output, "  confluence2md --dir ./docs                    Convert all .doc files in directory\n")
 		fmt.Fprintf(output, "  confluence2md --dir ./docs --dry-run          Preview conversions\n")
-		fmt.Fprintf(output, "  confluence2md --url <page url>                Fetch and convert a page\n")
-		fmt.Fprintf(output, "  confluence2md --url <page url> -r --out-dir ./docs\n")
-		fmt.Fprintf(output, "                                                Fetch a page and everything under it\n")
+		fmt.Fprintf(output, "\nFetching from Confluence (set CONFLUENCE_TOKEN first, plus CONFLUENCE_USER on Cloud):\n")
+		fmt.Fprintf(output, "  confluence2md --url \"<page url>\"                               Fetch one page\n")
+		fmt.Fprintf(output, "  confluence2md --url \"<page url>\" -o page.md                    Fetch one page to a chosen file\n")
+		fmt.Fprintf(output, "  confluence2md --url \"<page url>\" -r --out-dir ./docs           Fetch a page and all pages below it\n")
+		fmt.Fprintf(output, "  confluence2md --url \"<page url>\" -r --depth 1 --dry-run        Preview a page and its direct children\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
